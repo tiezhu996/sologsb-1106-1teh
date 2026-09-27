@@ -3,6 +3,7 @@
   import EmptyBox from '../components/common/EmptyBox.svelte'
   import { draftStore } from '../stores/draftStore'
   import { blockStore } from '../stores/blockStore'
+  import { repairStore } from '../stores/repairStore'
   import { buildDeviationNote } from '../utils/seq'
   import { downloadJson } from '../utils/export'
   import { db } from '../utils/db'
@@ -20,6 +21,7 @@
   let qcNote = $state('')
   let deviations = $state<Record<string, string>>({})
   let formMessage = $state('')
+  let saveSummary = $state('')
 
   const selectedDraft = $derived($draftStore.find((draft) => draft.id === draftId) ?? null)
   const selectedBlocks = $derived(
@@ -69,7 +71,7 @@
       })),
     )
 
-    await db.batches.add({
+    const batch: PrintBatch = {
       id: `batch-${crypto.randomUUID()}`,
       draftId,
       batchNo: batchNo.trim(),
@@ -79,7 +81,13 @@
       qty: Number(qty),
       pieceCount: Number(pieceCount),
       qcNote: qcNote.trim() ? `${qcNote.trim()}；${deviationText}` : deviationText,
-    })
+    }
+    await db.batches.add(batch)
+
+    const repairResult = await repairStore.recordBatchDeviations(
+      batch,
+      selectedBlocks.map((block) => ({ blockId: block.id, deviation: deviations[block.id] ?? '' })),
+    )
 
     await refreshBatches()
     showForm = false
@@ -91,16 +99,21 @@
     qcNote = ''
     deviations = {}
     formMessage = ''
+    saveSummary =
+      repairResult.created + repairResult.merged > 0
+        ? `批次已存档；为填了偏差的版片新开返修单 ${repairResult.created} 张，并入未完单 ${repairResult.merged} 张，详见修版返修页。`
+        : '批次已存档；各版未见偏差，未开返修单。'
   }
 
   async function exportArchive(): Promise<void> {
-    const [drafts, blocks, carvers, nodes] = await Promise.all([
+    const [drafts, blocks, carvers, nodes, repairs] = await Promise.all([
       db.drafts.toArray(),
       db.blocks.toArray(),
       db.carvers.toArray(),
       db.nodes.toArray(),
+      db.repairs.toArray(),
     ])
-    downloadJson('木版年画工序档案.json', { exportedAt: new Date().toISOString(), drafts, blocks, batches, carvers, nodes })
+    downloadJson('木版年画工序档案.json', { exportedAt: new Date().toISOString(), drafts, blocks, batches, carvers, nodes, repairs })
   }
 </script>
 
@@ -208,6 +221,8 @@
     </div>
   </section>
 {/if}
+
+{#if saveSummary}<p class="notice save-note" data-testid="save-summary">{saveSummary}</p>{/if}
 
 {#if batches.length === 0}
   <EmptyBox

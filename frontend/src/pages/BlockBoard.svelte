@@ -9,6 +9,7 @@
   import { blockStore } from '../stores/blockStore'
   import { carverStore } from '../stores/carverStore'
   import { draftStore } from '../stores/draftStore'
+  import { repairStore } from '../stores/repairStore'
   import { useBlockOrder } from '../hooks/useBlockOrder'
   import { useCarverLoad } from '../hooks/useCarverLoad'
   import { validateColorSequence } from '../utils/seq'
@@ -17,6 +18,7 @@
   import type { ProcessStage } from '../types/node'
 
   const draftId = $derived($params?.id ?? '')
+  const unfinishedRepairs = repairStore.unfinishedByBlock
   const {
     blocks: orderedBlocks,
     carvedRate: blockCarvedRate,
@@ -34,7 +36,7 @@
   const draft = $derived($draftStore.find((item) => item.id === draftId) ?? null)
 
   onMount(() => {
-    void Promise.all([draftStore.load(), blockStore.load(), carverStore.load()])
+    void Promise.all([draftStore.load(), blockStore.load(), carverStore.load(), repairStore.load()])
   })
 
   $effect(() => {
@@ -74,6 +76,10 @@
   }
 
   async function markCarved(block: Block): Promise<void> {
+    if (get(unfinishedRepairs)[block.id]) {
+      notice = `${block.blockName}还有未办结的修版返修单，请先在修版返修页办结。`
+      return
+    }
     await blockStore.update(block.id, { state: '已刻成' })
     await carverStore.releaseBlock(block.id)
     const currentBlocks = get(blockStore).filter((item) => item.draftId === draftId)
@@ -239,7 +245,11 @@
                   <td>
                     <span class="tag state-{block.state}">{block.state}</span>
                     {#if block.state !== '已刻成' && block.state !== '已修版'}
-                      <button class="mini-button strong" type="button" onclick={() => markCarved(block)}>标刻成</button>
+                      {#if $unfinishedRepairs[block.id]}
+                        <a class="mini-button repair-pending" use:link href="/repairs" title="该版有未办结的修版返修单，办结后才能标刻成">返修未办结</a>
+                      {:else}
+                        <button class="mini-button strong" type="button" onclick={() => markCarved(block)}>标刻成</button>
+                      {/if}
                     {/if}
                   </td>
                   <td>

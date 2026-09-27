@@ -4,6 +4,7 @@ import type { Block } from '../types/block'
 import type { Carver } from '../types/carver'
 import type { PrintBatch } from '../types/batch'
 import type { ProcessNode } from '../types/node'
+import type { RepairOrder } from '../types/repair'
 
 type StoredRecord = Record<string, unknown> & { schemaRev?: number }
 
@@ -13,6 +14,7 @@ class WoodprintDatabase extends Dexie {
   carvers!: Table<Carver, string>
   batches!: Table<PrintBatch, string>
   nodes!: Table<ProcessNode, string>
+  repairs!: Table<RepairOrder, string>
 
   constructor() {
     super('gbwoodprint-db')
@@ -38,6 +40,24 @@ class WoodprintDatabase extends Dexie {
         for (const tableName of tableNames) {
           await transaction.table(tableName).toCollection().modify((record: StoredRecord) => {
             record.schemaRev = 2
+          })
+        }
+      })
+
+    this.version(3)
+      .stores({
+        drafts: 'id, genre, status, title, schemaRev',
+        blocks: 'id, draftId, colorNo, carvedBy, state, schemaRev',
+        carvers: 'id, specialty, skillLevel, name, schemaRev',
+        batches: 'id, draftId, batchNo, printedAt, schemaRev',
+        nodes: 'id, batchId, blockId, stage, seq, operator, schemaRev',
+        repairs: 'id, draftId, blockId, status, openedAt, [blockId+status], schemaRev',
+      })
+      .upgrade(async (transaction) => {
+        const tableNames = ['drafts', 'blocks', 'carvers', 'batches', 'nodes'] as const
+        for (const tableName of tableNames) {
+          await transaction.table(tableName).toCollection().modify((record: StoredRecord) => {
+            record.schemaRev = 3
           })
         }
       })
@@ -193,8 +213,39 @@ const nodes: ProcessNode[] = [
   { id: 'node-ll-02', blockId: 'block-ll-01', stage: '修版', seq: 2, operator: '秦木生', startedAt: '2025-12-11T14:00', durationMin: 110, note: '鱼鳞线加修，边缘改圆顺。' },
 ]
 
+const repairs: RepairOrder[] = [
+  {
+    id: 'repair-ms-02-01',
+    draftId: 'draft-menshen-qin',
+    blockId: 'block-ms-02',
+    status: '未完成',
+    openedAt: '2026-02-20',
+    carverId: '',
+    repairMethod: '',
+    workHours: 0,
+    finishedAt: '',
+    deviations: [
+      { batchId: 'batch-ms-001', batchNo: '门神-试印-01', foundAt: '2026-02-20', text: '肩甲外侧轻微走版，试印样张可见错位。' },
+    ],
+  },
+  {
+    id: 'repair-ll-01-01',
+    draftId: 'draft-liannian-youyu',
+    blockId: 'block-ll-01',
+    status: '已完成',
+    openedAt: '2026-01-18',
+    carverId: 'carver-qin',
+    repairMethod: '鱼鳞线加修一遍，边缘改圆顺后试印验版。',
+    workHours: 2,
+    finishedAt: '2026-01-19T15:30',
+    deviations: [
+      { batchId: 'batch-ll-001', batchNo: '莲鱼-甲辰-01', foundAt: '2026-01-18', text: '鱼鳞线边缘发毛，细看有断线。' },
+    ],
+  },
+]
+
 function withSchemaRevision<T extends object>(records: T[]): Array<T & { schemaRev: number }> {
-  return records.map((record) => ({ ...record, schemaRev: 2 }))
+  return records.map((record) => ({ ...record, schemaRev: 3 }))
 }
 
 export const db = new WoodprintDatabase()
@@ -206,6 +257,7 @@ db.on('populate', () => {
     db.carvers.bulkAdd(withSchemaRevision(carvers)),
     db.batches.bulkAdd(withSchemaRevision(batches)),
     db.nodes.bulkAdd(withSchemaRevision(nodes)),
+    db.repairs.bulkAdd(withSchemaRevision(repairs)),
   ])
 })
 
@@ -214,12 +266,13 @@ export async function initializeDatabase(): Promise<void> {
   const draftCount = await db.drafts.count()
   if (draftCount > 0) return
 
-  await db.transaction('rw', db.drafts, db.blocks, db.carvers, db.batches, db.nodes, async () => {
+  await db.transaction('rw', [db.drafts, db.blocks, db.carvers, db.batches, db.nodes, db.repairs], async () => {
     await db.drafts.bulkPut(withSchemaRevision(drafts))
     await db.blocks.bulkPut(withSchemaRevision(blocks))
     await db.carvers.bulkPut(withSchemaRevision(carvers))
     await db.batches.bulkPut(withSchemaRevision(batches))
     await db.nodes.bulkPut(withSchemaRevision(nodes))
+    await db.repairs.bulkPut(withSchemaRevision(repairs))
   })
 }
 
