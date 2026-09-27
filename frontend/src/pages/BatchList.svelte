@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { link } from 'svelte-spa-router'
   import EmptyBox from '../components/common/EmptyBox.svelte'
   import { draftStore } from '../stores/draftStore'
   import { blockStore } from '../stores/blockStore'
+  import { repairStore } from '../stores/repairStore'
   import { buildDeviationNote } from '../utils/seq'
   import { downloadJson } from '../utils/export'
   import { db } from '../utils/db'
@@ -20,6 +22,7 @@
   let qcNote = $state('')
   let deviations = $state<Record<string, string>>({})
   let formMessage = $state('')
+  let saveNotice = $state('')
 
   const selectedDraft = $derived($draftStore.find((draft) => draft.id === draftId) ?? null)
   const selectedBlocks = $derived(
@@ -27,7 +30,7 @@
   )
 
   onMount(() => {
-    void Promise.all([draftStore.load(), blockStore.load(), refreshBatches()])
+    void Promise.all([draftStore.load(), blockStore.load(), repairStore.load(), refreshBatches()])
   })
 
   async function refreshBatches(): Promise<void> {
@@ -39,6 +42,7 @@
   function openForm(): void {
     showForm = true
     formMessage = ''
+    saveNotice = ''
     if (!draftId) {
       const firstDraft = $draftStore[0]
       if (firstDraft) selectDraft(firstDraft.id)
@@ -62,6 +66,10 @@
       return
     }
 
+    const deviationEntries = selectedBlocks
+      .map((block) => ({ blockId: block.id, note: (deviations[block.id] ?? '').trim() }))
+      .filter((entry) => entry.note.length > 0)
+
     const deviationText = buildDeviationNote(
       selectedBlocks.map((block) => ({
         blockName: block.blockName,
@@ -69,7 +77,7 @@
       })),
     )
 
-    await db.batches.add({
+    const batch: PrintBatch = {
       id: `batch-${crypto.randomUUID()}`,
       draftId,
       batchNo: batchNo.trim(),
@@ -79,9 +87,16 @@
       qty: Number(qty),
       pieceCount: Number(pieceCount),
       qcNote: qcNote.trim() ? `${qcNote.trim()}；${deviationText}` : deviationText,
-    })
+    }
 
+    const result = await repairStore.saveBatchWithRepairs(batch, deviationEntries)
     await refreshBatches()
+
+    saveNotice =
+      result.created === 0 && result.merged === 0
+        ? `批次「${batch.batchNo}」已保存，本次未登记版片偏差，无需返修。`
+        : `批次「${batch.batchNo}」已保存：新开修版返修单 ${result.created} 张，${result.merged} 条偏差并入了同版未完成的返修单。`
+
     showForm = false
     batchNo = ''
     paperBatch = ''
@@ -94,13 +109,14 @@
   }
 
   async function exportArchive(): Promise<void> {
-    const [drafts, blocks, carvers, nodes] = await Promise.all([
+    const [drafts, blocks, carvers, nodes, repairs] = await Promise.all([
       db.drafts.toArray(),
       db.blocks.toArray(),
       db.carvers.toArray(),
       db.nodes.toArray(),
+      db.repairs.toArray(),
     ])
-    downloadJson('木版年画工序档案.json', { exportedAt: new Date().toISOString(), drafts, blocks, batches, carvers, nodes })
+    downloadJson('木版年画工序档案.json', { exportedAt: new Date().toISOString(), drafts, blocks, batches, carvers, nodes, repairs })
   }
 </script>
 
@@ -112,13 +128,18 @@
   <div>
     <p class="eyebrow">套色印制留档</p>
     <h1>印制批次登记</h1>
-    <p>登记纸张、颜料与每版印次，逐版留下套色偏差。</p>
+    <p>登记纸张、颜料与每版印次，逐版留下套色偏差；填了偏差的版片会自动开修版返修单。</p>
   </div>
   <div class="heading-actions">
+    <a class="button ghost" use:link href="/repairs">修版返修单</a>
     <button class="button ghost" type="button" onclick={exportArchive}>导出 JSON</button>
     <button class="button primary" data-testid="new-batch" type="button" onclick={openForm}>新建批次</button>
   </div>
 </div>
+
+{#if saveNotice}
+  <p class="notice batch-notice" data-testid="batch-save-notice">{saveNotice}</p>
+{/if}
 
 <section class="summary-strip four">
   <div><span>登记批次</span><strong data-testid="count-batch">{batches.length}</strong></div>

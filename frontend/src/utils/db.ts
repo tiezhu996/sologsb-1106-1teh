@@ -4,6 +4,7 @@ import type { Block } from '../types/block'
 import type { Carver } from '../types/carver'
 import type { PrintBatch } from '../types/batch'
 import type { ProcessNode } from '../types/node'
+import type { RepairOrder } from '../types/repair'
 
 type StoredRecord = Record<string, unknown> & { schemaRev?: number }
 
@@ -13,6 +14,7 @@ class WoodprintDatabase extends Dexie {
   carvers!: Table<Carver, string>
   batches!: Table<PrintBatch, string>
   nodes!: Table<ProcessNode, string>
+  repairs!: Table<RepairOrder, string>
 
   constructor() {
     super('gbwoodprint-db')
@@ -41,6 +43,15 @@ class WoodprintDatabase extends Dexie {
           })
         }
       })
+
+    this.version(3).stores({
+      drafts: 'id, genre, status, title, schemaRev',
+      blocks: 'id, draftId, colorNo, carvedBy, state, schemaRev',
+      carvers: 'id, specialty, skillLevel, name, schemaRev',
+      batches: 'id, draftId, batchNo, printedAt, schemaRev',
+      nodes: 'id, batchId, blockId, stage, seq, operator, schemaRev',
+      repairs: 'id, draftId, blockId, status, schemaRev',
+    })
   }
 }
 
@@ -101,8 +112,8 @@ const blocks: Block[] = [
 
   { id: 'block-ll-01', draftId: 'draft-liannian-youyu', blockName: '墨线版', colorNo: 1, woodType: '黄杨', thicknessMm: 16, carvedBy: '齐师傅', state: '已修版', defectNote: '鱼鳞线加修一次，边缘改圆顺。' },
   { id: 'block-ll-02', draftId: 'draft-liannian-youyu', blockName: '黄版', colorNo: 2, woodType: '梨木', thicknessMm: 18, carvedBy: '周桂枝', state: '已刻成', defectNote: '荷叶边缘有针尖小孔，不影响印面。' },
-  { id: 'block-ll-03', draftId: 'draft-liannian-youyu', blockName: '红版', colorNo: 3, woodType: '梨木', thicknessMm: 18, carvedBy: '陈小满', state: '已刻成', defectNote: '无补版。' },
-  { id: 'block-ll-04', draftId: 'draft-liannian-youyu', blockName: '绿版', colorNo: 4, woodType: '梨木', thicknessMm: 18, carvedBy: '秦木生', state: '已刻成', defectNote: '青绿地留白平净。' },
+  { id: 'block-ll-03', draftId: 'draft-liannian-youyu', blockName: '红版', colorNo: 3, woodType: '梨木', thicknessMm: 18, carvedBy: '陈小满', state: '已修版', defectNote: '左肩衣纹补刻半线，返修后验线通过。' },
+  { id: 'block-ll-04', draftId: 'draft-liannian-youyu', blockName: '绿版', colorNo: 4, woodType: '梨木', thicknessMm: 18, carvedBy: '秦木生', state: '已刻成', defectNote: '荷叶边重影待返修，其余印面平净。' },
 ]
 
 const carvers: Carver[] = [
@@ -174,6 +185,17 @@ const batches: PrintBatch[] = [
     pieceCount: 2,
     qcNote: '墨线版：样张无断线；黄版：肩甲外侧出现轻微走版，已重校定位。',
   },
+  {
+    id: 'batch-ll-003',
+    draftId: 'draft-liannian-youyu',
+    batchNo: '莲鱼-甲辰-03',
+    printedAt: '2026-03-12',
+    paperBatch: '绵竹-2605',
+    inkNote: '绿料减胶半成，烟墨与红料照旧。',
+    qty: 260,
+    pieceCount: 4,
+    qcNote: '墨线版：清晰；黄版：套准；红版：左肩已归位；绿版：荷叶边重影，外缘偏绿线一根。',
+  },
 ]
 
 const nodes: ProcessNode[] = [
@@ -191,10 +213,56 @@ const nodes: ProcessNode[] = [
   { id: 'node-mk-03', blockId: 'block-mk-01', stage: '上样', seq: 3, operator: '齐师傅', startedAt: '2026-02-03T08:20', durationMin: 90, note: '旗面折线以淡朱定位。' },
   { id: 'node-ll-01', blockId: 'block-ll-01', stage: '刻版', seq: 1, operator: '齐师傅', startedAt: '2025-12-08T08:00', durationMin: 620, note: '娃娃轮廓与抱鱼线条一次成版。' },
   { id: 'node-ll-02', blockId: 'block-ll-01', stage: '修版', seq: 2, operator: '秦木生', startedAt: '2025-12-11T14:00', durationMin: 110, note: '鱼鳞线加修，边缘改圆顺。' },
+  { id: 'node-ll-03', blockId: 'block-ll-03', stage: '修版', seq: 1, operator: '秦木生', startedAt: '2026-02-08T10:30', durationMin: 90, note: '左肩衣纹补刻半线，试印校样通过。' },
 ]
 
-function withSchemaRevision<T extends object>(records: T[]): Array<T & { schemaRev: number }> {
-  return records.map((record) => ({ ...record, schemaRev: 2 }))
+const repairs: RepairOrder[] = [
+  {
+    id: 'repair-ms-02-01',
+    draftId: 'draft-menshen-qin',
+    blockId: 'block-ms-02',
+    status: '未完成',
+    deviations: [
+      { batchId: 'batch-ms-001', batchNo: '门神-试印-01', printedAt: '2026-02-20', note: '肩甲外侧轻微走版，右边缘错位约半线。' },
+    ],
+    repairBy: '',
+    repairMethod: '',
+    laborHours: 0,
+    createdAt: '2026-02-20T16:30',
+    completedAt: '',
+  },
+  {
+    id: 'repair-ll-04-01',
+    draftId: 'draft-liannian-youyu',
+    blockId: 'block-ll-04',
+    status: '未完成',
+    deviations: [
+      { batchId: 'batch-ll-003', batchNo: '莲鱼-甲辰-03', printedAt: '2026-03-12', note: '荷叶边重影，外缘偏绿线一根。' },
+    ],
+    repairBy: '秦木生',
+    repairMethod: '荷叶外缘铲底收线，崩口处嵌补梨木。',
+    laborHours: 2.5,
+    createdAt: '2026-03-12T17:10',
+    completedAt: '',
+  },
+  {
+    id: 'repair-ll-03-01',
+    draftId: 'draft-liannian-youyu',
+    blockId: 'block-ll-03',
+    status: '已完成',
+    deviations: [
+      { batchId: 'batch-ll-002', batchNo: '莲鱼-甲辰-02', printedAt: '2026-02-06', note: '左肩偏差约半线。' },
+    ],
+    repairBy: '秦木生',
+    repairMethod: '左肩衣纹补刻半线，试印校样后压平。',
+    laborHours: 1.5,
+    createdAt: '2026-02-06T16:00',
+    completedAt: '2026-02-08T10:30',
+  },
+]
+
+function withSchemaRevision<T extends object>(records: T[], rev = 3): Array<T & { schemaRev: number }> {
+  return records.map((record) => ({ ...record, schemaRev: rev }))
 }
 
 export const db = new WoodprintDatabase()
@@ -206,6 +274,7 @@ db.on('populate', () => {
     db.carvers.bulkAdd(withSchemaRevision(carvers)),
     db.batches.bulkAdd(withSchemaRevision(batches)),
     db.nodes.bulkAdd(withSchemaRevision(nodes)),
+    db.repairs.bulkAdd(withSchemaRevision(repairs)),
   ])
 })
 
@@ -214,13 +283,18 @@ export async function initializeDatabase(): Promise<void> {
   const draftCount = await db.drafts.count()
   if (draftCount > 0) return
 
-  await db.transaction('rw', db.drafts, db.blocks, db.carvers, db.batches, db.nodes, async () => {
-    await db.drafts.bulkPut(withSchemaRevision(drafts))
-    await db.blocks.bulkPut(withSchemaRevision(blocks))
-    await db.carvers.bulkPut(withSchemaRevision(carvers))
-    await db.batches.bulkPut(withSchemaRevision(batches))
-    await db.nodes.bulkPut(withSchemaRevision(nodes))
-  })
+  await db.transaction(
+    'rw',
+    [db.drafts, db.blocks, db.carvers, db.batches, db.nodes, db.repairs],
+    async () => {
+      await db.drafts.bulkPut(withSchemaRevision(drafts))
+      await db.blocks.bulkPut(withSchemaRevision(blocks))
+      await db.carvers.bulkPut(withSchemaRevision(carvers))
+      await db.batches.bulkPut(withSchemaRevision(batches))
+      await db.nodes.bulkPut(withSchemaRevision(nodes))
+      await db.repairs.bulkPut(withSchemaRevision(repairs))
+    },
+  )
 }
 
 export type { WoodprintDatabase }

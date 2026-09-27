@@ -9,6 +9,7 @@
   import { blockStore } from '../stores/blockStore'
   import { carverStore } from '../stores/carverStore'
   import { draftStore } from '../stores/draftStore'
+  import { repairStore } from '../stores/repairStore'
   import { useBlockOrder } from '../hooks/useBlockOrder'
   import { useCarverLoad } from '../hooks/useCarverLoad'
   import { validateColorSequence } from '../utils/seq'
@@ -32,9 +33,10 @@
   let lastSync = $state('刚刚')
 
   const draft = $derived($draftStore.find((item) => item.id === draftId) ?? null)
+  const openRepairBlockIds = $derived(new Set($repairStore.filter((order) => order.status === '未完成').map((order) => order.blockId)))
 
   onMount(() => {
-    void Promise.all([draftStore.load(), blockStore.load(), carverStore.load()])
+    void Promise.all([draftStore.load(), blockStore.load(), carverStore.load(), repairStore.load()])
   })
 
   $effect(() => {
@@ -74,6 +76,10 @@
   }
 
   async function markCarved(block: Block): Promise<void> {
+    if (openRepairBlockIds.has(block.id)) {
+      notice = `${block.blockName}还有未完成的修版返修单，办结后才能标刻成。`
+      return
+    }
     await blockStore.update(block.id, { state: '已刻成' })
     await carverStore.releaseBlock(block.id)
     const currentBlocks = get(blockStore).filter((item) => item.draftId === draftId)
@@ -171,7 +177,7 @@
     <div><span>版片总数</span><strong>{$orderedBlocks.length}</strong></div>
     <div><span>刻成率</span><strong>{$blockCarvedRate}%</strong></div>
     <div><span>在刻版片</span><strong>{$orderedBlocks.filter((block) => block.state === '在刻').length}</strong></div>
-    <div><span>需修版片</span><strong>{$orderedBlocks.filter((block) => block.defectNote).length}</strong></div>
+    <div><span>待返修版片</span><strong>{$orderedBlocks.filter((block) => openRepairBlockIds.has(block.id)).length}</strong></div>
   </section>
 
   <div class="workbench-grid">
@@ -238,8 +244,20 @@
                   </td>
                   <td>
                     <span class="tag state-{block.state}">{block.state}</span>
+                    {#if openRepairBlockIds.has(block.id)}
+                      <span class="tag repair-flag">返修待结</span>
+                    {/if}
                     {#if block.state !== '已刻成' && block.state !== '已修版'}
-                      <button class="mini-button strong" type="button" onclick={() => markCarved(block)}>标刻成</button>
+                      <button
+                        class="mini-button strong"
+                        type="button"
+                        disabled={openRepairBlockIds.has(block.id)}
+                        title={openRepairBlockIds.has(block.id) ? '有未完成的修版返修单，办结后才能标刻成' : ''}
+                        onclick={() => markCarved(block)}
+                      >标刻成</button>
+                      {#if openRepairBlockIds.has(block.id)}
+                        <small class="repair-hint">返修单未办结，暂不可标刻成</small>
+                      {/if}
                     {/if}
                   </td>
                   <td>
@@ -293,6 +311,7 @@
         <small>分钟</small>
       </div>
       {#if notice}<p class="notice">{notice}</p>{/if}
+      <a class="button secondary full" use:link href="/repairs">查看修版返修单</a>
       <a class="button secondary full" use:link href="/carvers">查看刻工档与分布</a>
     </aside>
   </div>
